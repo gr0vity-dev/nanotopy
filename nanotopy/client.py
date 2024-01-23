@@ -1,48 +1,84 @@
-from nanotopy.client_dynamic import NanoRpc
-from nanotopy.versions.nano_local import *
+
+from nanotopy.src.nano_local import *
+from nanorpc.client_nanoto import NanoToRpcTyped
 from enum import Enum
 
 
-class ThresholdType(Enum):
+class AmountType(Enum):
     NANO = "nano"  # 1
     RAW = "raw"  # 10^-30 nano
 
 
-class NanoRpcTyped:
+class NanoTo:
     def __init__(self, auth_key, app_name="nanoto_python_lib", app_email=None):
-        self.rpc = NanoRpc(url="https://rpc.nano.to",
-                           auth_key=auth_key, app_name=app_name, app_email=app_email)
+        self.rpc = NanoToRpcTyped(
+            auth_key=auth_key, app_name=app_name, app_email=app_email)
+
+    async def _amount_to_raw(self, amount, amount_type):
+        if amount_type == AmountType.NANO:
+            amount = await self.nano_to_raw(amount)
+        else:
+            amount = amount
+        return amount
+
+    @staticmethod
+    async def get_auth_key(email):
+        temp_rpc = NanoToRpcTyped(auth_key=None)
+        return await temp_rpc.gpu_key(email)
+
+    @staticmethod
+    def generate_seed():
+        return nl_generate_seed()
+
+    @staticmethod
+    def get_private_key_from_seed(seed, seed_index):
+        return nl_get_private_key_from_seed(seed, seed_index)
+
+    @staticmethod
+    def get_account_from_seed(seed, seed_index):
+        return nl_get_account_from_seed(seed, seed_index)
+
+    @staticmethod
+    def get_account_from_key(private_key):
+        return nl_get_account_from_key(private_key)
+
+    @staticmethod
+    def get_account_public_key(account):
+        return nl_get_account_public_key(account)
 
     async def send(self, private_key, amount_to_send, destination):
-        account = get_account_from_key(private_key)
-        account_info = await self.account_info(account)
-        work = await self.work_generate(account_info["work_hash"])
+        amount_to_send = nl_int_balance(amount_to_send)
+        account_info = await self.account_info_from_key(private_key)
+        work_response = await self.work_generate(account_info["work_hash"])
+        work = work_response["work"]
         frontier = account_info["frontier"]
-        current_balance = account_info["balance"]
+        current_balance = nl_int_balance(account_info["balance"])
+        final_balance = current_balance - amount_to_send
         representative = account_info["representative"]
 
-        block = await create_send_block_from_key(private_key, frontier, current_balance, amount_to_send, destination, work, representative)
-        response = self.process(block)
+        block = nl_create_block_from_key(
+            private_key, frontier, final_balance, destination, work, representative)
+        response = await self.process(block)
         return response
 
     async def receive_block(self, private_key, incoming_amount, send_hash):
-        account = get_account_from_key(private_key)
-        account_info = await self.account_info(account)
+        incoming_amount = nl_int_balance(incoming_amount)
+        account_info = await self.account_info_from_key(private_key)
         work_response = await self.work_generate(account_info["work_hash"])
         work = work_response["work"]
         frontier = account_info["frontier"]
         representative = account_info["representative"]
-        block = await create_receive_block_from_key(private_key, frontier, incoming_amount, send_hash, work, representative)
+        current_balance = nl_int_balance(account_info["balance"])
+        final_balance = current_balance + incoming_amount
+        block = nl_create_block_from_key(
+            private_key, frontier, final_balance, send_hash, work, representative)
         response = await self.process(block)
         return response
 
-    async def receive_blocks_many(self, private_key, threshold=0.000001, threshold_type=ThresholdType.NANO):
+    async def receive_blocks_many(self, private_key, threshold=0.000001, threshold_type=AmountType.NANO):
         result = []
-        account = get_account_from_key(private_key)
-        if threshold_type == ThresholdType.NANO:
-            threshold_raw = await self.nano_to_raw(threshold)
-        else:
-            threshold_raw = threshold
+        account = self.get_account_from_key(private_key)
+        threshold_raw = await self._amount_to_raw(threshold, threshold_type)
 
         blocks = await self.receivable(account, threshold=threshold_raw, source=True, array=False)
         for block in blocks:
@@ -56,14 +92,14 @@ class NanoRpcTyped:
         return await self.rpc.version()
 
     async def account_info_from_key(self, private_key):
-        account = get_account_from_key(private_key)
+        account = self.get_account_from_key(private_key)
         return await self.account_info(account)
 
     async def account_info(self, account, representative=True, weight=True, receivable=True, include_confirmed=True):
         result: dict
         result = await self.rpc.account_info(account, representative=representative, weight=weight, receivable=receivable, include_confirmed=include_confirmed)
         result.setdefault("work_hash", result.get(
-            "frontier", get_account_public_key(account)))
+            "frontier", self.get_account_public_key(account)))
         result.setdefault("frontier", "0"*64)
         result.setdefault("open_block", "0" * 64)
         result.setdefault("block_count", "0")
@@ -98,8 +134,8 @@ class NanoRpcTyped:
     async def process(self, block, force=None, subtype=None, json_block=False, async_=None):
         return await self.rpc.process(block, force=force, subtype=subtype, json_block=json_block, async_=async_)
 
-    async def work_generate(self, hash):
-        return await self.rpc.work_generate(hash)
+    async def work_generate(self, hash, key=None):
+        return await self.rpc.work_generate(hash, key=key)
 
     async def block_count(self, include_cemented=None):
         return await self.rpc.block_count(include_cemented=include_cemented)

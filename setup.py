@@ -5,12 +5,12 @@ with open("README.md", "r") as fh:
 
 setup(
     name='nanotopy',
-    version='0.0.1',
+    version='0.1.0',
     packages=find_packages(),
-    install_requires=['aiohttp', 'asyncio'],
+    install_requires=['nanorpc', 'asyncio'],
     python_requires='>=3.7',
     author='gr0vity',
-    url="https://github.com/gr0vity-dev/nanomock",
+    url="https://github.com/gr0vity-dev/nanotopy",
     description='async extended nano.to library for ease of use',
     long_description=long_description,
     long_description_content_type="text/markdown",
